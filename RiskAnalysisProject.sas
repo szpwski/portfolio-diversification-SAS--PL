@@ -155,6 +155,48 @@ run;
 
 /* -------------------- */
 /* DOPASOWANIE ROZKŁADOW */
+data alior2;
+	set work.alior;
+	L_alior=L_alior+100;
+run;
+
+proc severity data=alior2 print=all plots=qq;
+	loss L_alior;
+	dist GAMMA LOGN WEIBULL LOGLOGISTIC;
+run;
+
+proc univariate data=alior2 normaltest;
+	var L_alior;
+	histogram L_alior / weibull (SIGMA=EST THETA=EST C=EST) normal 
+		lognormal (ZETA=EST THETA=EST SIGMA=EST);
+	qq L_alior / normal;
+	qq L_alior /weibull(SIGMA=EST THETA=EST C=EST);
+	qq L_alior / lognormal(ZETA=EST THETA=EST sigma=EST);
+run;
+
+proc severity data=alior2 obj=cvmobj print=all plots=qq;
+	loss L_alior;
+	dist EXP GPD IGAUSS LOGN PARETO WEIBULL GAMMA;
+	cvmobj=_cdf_(L_alior);
+	cvmobj=(cvmobj -_edf_(L_alior))**2;
+run;
+
+data pko2;
+	set work.pko;
+	L_pko=L_pko+100;
+run;
+
+proc severity data=pko2 print=all plots=qq;
+	loss L_pko;
+	dist GAMMA LOGN WEIBULL;
+run;
+
+proc univariate data=pko2 normaltest;
+	var L_pko;
+	histogram L_pko / lognormal gamma;
+run;
+
+/* DOPASOWANIE ROZKLADOW - OSTATECZNE */
 proc univariate data=alior normaltest;
 	var L_alior;
 	histogram L_alior / weibull (SIGMA=EST THETA=EST C=EST) gamma (THETA=EST) 
@@ -203,33 +245,178 @@ proc iml;
 	kappa2=(beta2hat - p*(p+2) ) / sqrt(8*p*(p+2)/n);
 	pvalskew=1 - probchi(kappa1, dfchi);
 	pvalkurt=2*(1 - probnorm(abs(kappa2)) );
-	tests= {'Na podstawie skośności', 'Na podstawie kurtozy'};
-	estymatory = {13.76748411, 5.21007803};
-	p_value= {0.00807534741616953, 1.88761221542322E-07};
+	tests={'Na podstawie skośności', 'Na podstawie kurtozy'};
+	estymatory={13.76748411, 5.21007803};
+	p_value={0.00807534741616953, 1.88761221542322E-07};
 	print s;
 	print s_inv;
 	print "Mardia Test";
-	print tests[L="  "]
-	      estymatory[L="Estymator"]
-	      p_value[L="Wartość p"];
+	print tests[L="  "] estymatory[L="Estymator"] p_value[L="Wartość p"];
 run;
 
 /* VaR */
 proc iml;
-var={'Value-at-Risk - metoda analityczna', 'Value-at-Risk - kwantyl empiryczny'};
-alior={19.4917, 17.59755};
-pko={11.94966, 9.12390};
-print var[L="  "]
-      alior[L="Alior Bank"]
-      pko[L="PKO BP"];
+	var={'Value-at-Risk - metoda analityczna', 
+		'Value-at-Risk - kwantyl empiryczny'};
+	alior={19.4917, 17.59755};
+	pko={11.94966, 9.12390};
+	print var[L="  "] alior[L="Alior Bank"] pko[L="PKO BP"];
 run;
 
 /* Expected Shortfall */
-proc iml;
-es={'Expected Shortfall'};
-alior={23.82142};
-pko={14.91499};
-print es[L="  "]
-      alior[L="Alior Bank"]
-      pko[L="PKO BP"];
+proc sort data=alior out=alior_sort;
+	by descending L_alior;
+
+proc means data=alior_sort (obs=3) mean;
+	var L_alior;
 run;
+
+proc sort data=pko out=pko_sort;
+	by descending L_pko;
+
+proc means data=pko_sort (obs=3) mean;
+	var L_pko;
+run;
+
+/* Wartości na podstawie programu R */
+proc iml;
+	es={'Expected Shortfall - z kwantyla empirycznego', 
+		'Expected Shortfall - z metody analitycznej'};
+	alior={31.4777, 23.82142};
+	pko={17.2293, 14.91499};
+	print es[L="  "] alior[L="Alior Bank"] pko[L="PKO BP"];
+run;
+
+/* Dopasowanie kopuł + symulacja*/
+data laczna;
+	set alior (keep=L_alior);
+	set pko (keep=L_pko);
+run;
+
+/* CLAYTON */
+proc copula data=laczna;
+	title "Kopula Claytona";
+	var L_alior L_pko;
+	fit clayton/outcopula=clayton_parametry;
+run;
+
+proc copula;
+	title "Kopula Claytona";
+	var u v;
+	define c_cop clayton (theta=0.794450);
+	simulate c_cop/seed=1234 ndraws=1000 outuniform=clayton_jednorodne 
+		plots=(datatype=UNIFORM distribution=CDF);
+run;
+
+/* FRANK */
+proc copula data=laczna;
+	title "Kopula Franka";
+	var L_alior L_pko;
+	fit frank/outcopula=frank_parametry;
+run;
+
+proc copula;
+	title "Kopula Franka";
+	var u v;
+	define f_cop frank (theta=3.138756);
+	simulate f_cop/seed=1234 ndraws=1000 outuniform=frank_jednorodne 
+		plots=(datatype=UNIFORM distribution=CDF);
+run;
+
+/* GUMBEL */
+proc copula data=laczna;
+	title "Kopula Gumbela";
+	var L_alior L_pko;
+	fit gumbel/outcopula=gumbel_parametry;
+run;
+
+proc copula;
+	title "Kopula Gumbela";
+	var u v;
+	define g_cop gumbel (theta=1.480122);
+	simulate g_cop/seed=1234 ndraws=1000 outuniform=gumbel_jednorodne 
+		plots=(datatype=UNIFORM distribution=CDF);
+run;
+
+/* KOPULA T */
+proc copula data=laczna;
+	title "Kopuła t";
+	var L_alior L_pko;
+	fit t/ outcopula=t_parametry;
+run;
+
+proc iml;
+	/*deklarowanie macierzy*/
+	P={1 0.5183, 0.5183 1};
+	create Sasp from P;
+	append from P;
+	close Sasp;
+
+proc copula;
+	title "Kopuła t-studenta";
+	var u v;
+	define c_cop t (corr=Sasp df=14.627611);
+	simulate c_cop/seed=1234 ndraws=1000 outuniform=t_jednorodne 
+		plots=(datatype=UNIFORM distribution=CDF);
+run;
+
+/* Zestawienie parametrow oraz wynikow dopasowania kopul */
+proc iml;
+	var={'Parametr', 'LOG', 'AIC', 'SBC'};
+	clayton={0.794450, 7.35307, -12.70615, -10.61180};
+	frank={3.138756, 6.84837, -11.69674, -9.60240};
+	gumbel={1.480122, 7.81485, -13.62971, -11.53537};
+	t={14.627611, 8.24208, -12.48417, -8.29548};
+	print var[L="  "] clayton[L="Kopuła Claytona"] frank[L="Kopuła Franka"] 
+		gumbel[L="Kopuła Gumbela"] t[L="Kopuła t"];
+run;
+
+/* Ponowna symulacja najlepiej dopasowanej kopuły (Clayton) */
+proc copula;
+	title "Kopula Gumbela";
+	var u v;
+	define g_cop gumbel (theta=1.480122);
+	simulate g_cop/seed=1234 ndraws=1000 outuniform=gumbel_jednorodne 
+		plots=(datatype=UNIFORM distribution=CDF);
+run;
+
+/* Transformacja punktów z kopuły najlepiej dopasowanej (Clayton) w celu uzyskania stóp strat inwestycji w Alior oraz PKO */
+data transformacja;
+	set gumbel_jednorodne;
+	L_alior=quantile('Normal', u, 2.4483, 10.362);
+	L_pko=quantile('Normal', v, 0.277, 7.0965);
+run;
+
+/* Symulacja wybranych punktow w 3-wymiarze */
+ods graphics on;
+
+proc kde data=transformacja;
+	bivar L_alior L_pko/ plots=all;
+run;
+
+/* Obliczenie miar ryzyka dla portfela dwuwymiarowego */
+%macro Kopula (a);
+	data div;
+		set transformacja;
+		L=&a*L_alior+(1-&a)*L_pko;
+	run;
+
+	proc univariate data=div;
+		var L;
+	run;
+
+	proc sort data=div out=div_sort;
+		by descending L;
+
+	proc means data=div_sort (obs=50) mean;
+		var L;
+	run;
+
+%mend;
+
+%Kopula (0) %Kopula (0.1) %Kopula (0.2) %Kopula (0.3) %Kopula (0.4) 
+	%Kopula (0.5) %Kopula (0.6) %Kopula (0.7) %Kopula (0.8) %Kopula (0.9) 
+	%Kopula (1)
+%Kopula (0.1) %Kopula (0.11) %Kopula (0.12) %Kopula (0.13) %Kopula (0.14) %Kopula (0.15) 
+%Kopula (0.16) %Kopula (0.17) %Kopula (0.18) %Kopula (0.19) %Kopula (0.2)  
+	
